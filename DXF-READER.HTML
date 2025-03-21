@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DXF Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      font-size: 3vw;
+      background-color: gray;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+    }
+    canvas {
+      border: 1px solid black;
+      width: 80vw;
+      height: 80vh;
+      background-color: black;
+    }
+    h2 {
+      font-size: 2vw;
+    }
+    input[type='file'] {
+      font-size: 1.5vw;
+      border-radius: 10px;
+      padding: 10px;
+      color: rgb(255,95,21);
+      background-color: black;
+    }
+    button {
+      font-size: 1.5vw;
+      padding: 10px;
+      border-radius: 3vw;
+      color: rgb(255,95,21);
+      background-color: black;
+    }
+    #upload-section {
+      display: flex;
+      width: 80vw;
+      justify-content: center;
+      margin: 2%;
+    }
+    #controls {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #zoom-slider, #rotate-slider {
+      width: 80%;
+    }
+  </style>
+</head>
+<body>
+  <section id="upload-section">
+    <input type="file" id="dxf-upload" accept=".dxf">
+    <button id="load-button">Generate</button>
+  </section>
+
+  <section id="dxf-display">
+    <h2>DXF Preview</h2>
+    <canvas id="dxf-canvas"></canvas>
+  </section>
+
+  <section id="controls">
+    <label for="zoom-slider">Zoom:</label>
+    <input type="range" id="zoom-slider" min="1" max="200" value="100">
+    <br>
+    <label for="rotate-slider">Rotate:</label>
+    <input type="range" id="rotate-slider" min="0" max="360" value="0">
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
+
+  <script>
+    document.getElementById('load-button').addEventListener('click', loadDXF);
+
+    let parsedPaths = [];
+    let zoom = 1;
+    let rotate = 0;
+    let minX, minY, maxX, maxY;
+
+    // Event listeners for zoom and rotate sliders
+    document.getElementById('zoom-slider').addEventListener('input', (event) => {
+      zoom = event.target.value / 100;
+      drawDXFPaths(parsedPaths);
+    });
+
+    document.getElementById('rotate-slider').addEventListener('input', (event) => {
+      rotate = event.target.value;
+      drawDXFPaths(parsedPaths);
+    });
+
+    // Load the DXF file and parse it
+    function loadDXF() {
+      const fileInput = document.getElementById('dxf-upload');
+      const file = fileInput.files[0];
+
+      if (!file) {
+        alert("Please upload a DXF file.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const dxfText = event.target.result;
+        parseDXF(dxfText);
+      };
+      reader.readAsText(file);
+    }
+
+    // Parse the DXF content using dxf-parser
+    function parseDXF(dxfText) {
+      const parser = new DxfParser();
+      try {
+        const dxf = parser.parseSync(dxfText);  // Parse the DXF string into a JavaScript object
+        console.log("Parsed DXF:", dxf);
+        const pathsData = extractPathsFromDXF(dxf);
+        parsedPaths = pathsData.paths;
+        minX = pathsData.minX;
+        minY = pathsData.minY;
+        maxX = pathsData.maxX;
+        maxY = pathsData.maxY;
+        drawDXFPaths(parsedPaths); // Draw paths after loading the DXF
+      } catch (err) {
+        console.error("Error parsing DXF file:", err);
+      }
+    }
+
+    // Extract paths from DXF
+    function extractPathsFromDXF(dxf) {
+      const paths = [];
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+      dxf.entities.forEach(entity => {
+        if (entity.type === 'LINE') {
+          paths.push({
+            x1: entity.vertices[0].x,
+            y1: entity.vertices[0].y,
+            x2: entity.vertices[1].x,
+            y2: entity.vertices[1].y
+          });
+
+          minX = Math.min(minX, entity.vertices[0].x, entity.vertices[1].x);
+          minY = Math.min(minY, entity.vertices[0].y, entity.vertices[1].y);
+          maxX = Math.max(maxX, entity.vertices[0].x, entity.vertices[1].x);
+          maxY = Math.max(maxY, entity.vertices[0].y, entity.vertices[1].y);
+        }
+        else if (entity.type === 'CIRCLE') {
+          paths.push({
+            circle1: entity.center.x,
+            circle2: entity.center.y,
+            circle3: entity.radius
+          });
+
+          minX = Math.min(minX, entity.center.x - entity.radius);
+          minY = Math.min(minY, entity.center.y - entity.radius);
+          maxX = Math.max(maxX, entity.center.x + entity.radius);
+          maxY = Math.max(maxY, entity.center.y + entity.radius);
+        }
+        else if (entity.type === 'ARC') {
+          paths.push({
+            ARC1: entity.center.x,
+            ARC2: entity.center.y,
+            ARC3: entity.radius,
+            ARC4: entity.startAngle,
+            ARC5: entity.endAngle
+          });
+
+          minX = Math.min(minX, entity.center.x - entity.radius);
+          minY = Math.min(minY, entity.center.y - entity.radius);
+          maxX = Math.max(maxX, entity.center.x + entity.radius);
+          maxY = Math.max(maxY, entity.center.y + entity.radius);
+        }
+      });
+
+      return { paths, minX, minY, maxX, maxY };
+    }
+
+    // Rotate a point (x, y) around a center (cx, cy) by a given angle in radians
+    function rotatePoint(x, y, cx, cy, angle) {
+      const sinAngle = Math.sin(angle);
+      const cosAngle = Math.cos(angle);
+      const dx = x - cx;
+      const dy = y - cy;
+      const rotatedX = cosAngle * dx - sinAngle * dy + cx;
+      const rotatedY = sinAngle * dx + cosAngle * dy + cy;
+      return { x: rotatedX, y: rotatedY };
+    }
+
+    // Draw parsed paths on the canvas with zoom and rotation applied
+    function drawDXFPaths({ paths, minX, minY, maxX, maxY }) {
+      const canvas = document.getElementById('dxf-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+
+      ctx.strokeStyle = "rgb(255,95,21)";
+      ctx.lineWidth = 2;
+
+      // Calculate width and height of the DXF drawing
+      const dxfWidth = maxX - minX;
+      const dxfHeight = maxY - minY;
+
+      // Calculate scaling factor
+      const scaleX = canvas.width / dxfWidth;
+      const scaleY = canvas.height / dxfHeight;
+      const scale = Math.min(scaleX, scaleY) * zoom; // Apply zoom factor
+
+      // Calculate offset to center the drawing
+      const offsetX = (canvas.width - dxfWidth * scale) / 2;
+      const offsetY = (canvas.height - dxfHeight * scale) / 2;
+
+      ctx.beginPath();
+
+      paths.forEach(path => {
+        if (path.x1 !== undefined && path.x2 !== undefined) {  // LINE
+          const lineStart = rotatePoint(path.x1, path.y1, minX, minY, rotate * (Math.PI / 180));
+          const lineEnd = rotatePoint(path.x2, path.y2, minX, minY, rotate * (Math.PI / 180));
+
+          const x1 = (lineStart.x - minX) * scale + offsetX;
+          const y1 = (lineStart.y - minY) * scale + offsetY;
+          const x2 = (lineEnd.x - minX) * scale + offsetX;
+          const y2 = (lineEnd.y - minY) * scale + offsetY;
+
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+        }
+
+        if (path.circle1 !== undefined && path.circle2 !== undefined && path.circle3 !== undefined) {  // CIRCLE
+          const circleCenter = rotatePoint(path.circle1, path.circle2, minX, minY, rotate * (Math.PI / 180));
+
+          const centerX = (circleCenter.x - minX) * scale + offsetX;
+          const centerY = (circleCenter.y - minY) * scale + offsetY;
+          const radius = path.circle3 * scale;
+
+          ctx.moveTo(centerX + radius, centerY);
+          ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        }
+
+        if (path.ARC1 !== undefined && path.ARC2 !== undefined && path.ARC3 !== undefined) {  // ARC
+          const arcCenter = rotatePoint(path.ARC1, path.ARC2, minX, minY, rotate * (Math.PI / 180));
+
+          const centerX = (arcCenter.x - minX) * scale + offsetX;
+          const centerY = (arcCenter.y - minY) * scale + offsetY;
+          const radius = path.ARC3 * scale;
+
+          const startAngle = path.ARC4 * (Math.PI / 180);
+          const endAngle = path.ARC5 * (Math.PI / 180);
+
+          ctx.moveTo(centerX + radius * Math.cos(startAngle), centerY + radius * Math.sin(startAngle));
+          ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+        }
+      });
+
+      ctx.stroke();
+    }
+  </script>
+</body>
+</html>
